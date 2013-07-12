@@ -17,6 +17,8 @@ module CohortMe
     activity_table_name = ActiveModel::Naming.plural(activity_class)
     activity_user_id = options[:activity_user_id] || "user_id"
 
+    summary_column = options[:summary_column] || "count(*)"
+
     period_values = %w[weeks days months]
 
     raise "Period '#{interval_name}' not supported. Supported values are #{period_values.join(' or ')}" unless period_values.include? interval_name
@@ -47,32 +49,30 @@ module CohortMe
       cohort_query = cohort_query.where(activation_conditions)
     end
 
-
     # if custom_selects
     #   cohort_query = cohort_query.select(custom_selects)
     # end
 
     if %(mysql mysql2).include?(ActiveRecord::Base.connection.instance_values["config"][:adapter])
-    
       select_sql = "#{activity_table_name}.#{activity_user_id}, #{activity_table_name}.created_at, cohort_date, FLOOR(TIMEDIFF(#{activity_table_name}.created_at, cohort_date)/#{time_conversion}) as periods_out"
     elsif ActiveRecord::Base.connection.instance_values["config"][:adapter] == "postgresql"
       select_sql = "#{activity_table_name}.#{activity_user_id}, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date))/#{time_conversion}) as periods_out"
-      select_group_sql = "count(*) number_activities, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date))/#{time_conversion}) as periods_out"
+      select_summary_sql = "#{summary_column} summary_value, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date))/#{time_conversion}) as periods_out"
     else
       raise "database not supported"
     end
-    activity_query = activity_class.where("#{activity_table_name}.created_at > ?", start_from).select(select_group_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").group("cohort_date,periods_out")
 
-
-
+    summary_query = activity_class.where("#{activity_table_name}.created_at > ?", start_from).select(select_summary_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").group("cohort_date,periods_out")
     data = activity_class.where("#{activity_table_name}.created_at > ?", start_from).select(select_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").group("cohort_date,periods_out,#{activity_table_name}.#{activity_user_id}")
+    
     if activity_conditions
-      activity_query = activity_query.where(activity_conditions)
+      summary_query = summary_query.where(activity_conditions)
       data = data.where(activity_conditions)
     end
+    
     unique_data = data.all.uniq{|d| [d.send(activity_user_id), d.cohort_date, d.periods_out] }
     activated_data = Hash[activated_query.all.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name)}]
-    activity_data = Hash[activity_query.all.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name)}]
+    summary_data = Hash[summary_query.all.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name)}]
 
     analysis = unique_data.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name)}
 
@@ -83,18 +83,18 @@ module CohortMe
 
     cohort_hash.each do |r| 
       periods = []
-      activities = []
+      summaries = []
 
       table[r[0]] = {}
 
       cohort_hash.size.times{|i| periods << r[1].count{|d| d.periods_out.to_i == i}  if r[1]} 
-      cohort_hash.size.times{|i| activities << activity_data[r[0]].select{|d| d.periods_out.to_i == i}[0].number_activities  if activity_data[r[0]].select{|d| d.periods_out.to_i == i}[0]} 
+      cohort_hash.size.times{|i| summaries << summary_data[r[0]].select{|d| d.periods_out.to_i == i}[0].summary_value  if summary_data[r[0]].select{|d| d.periods_out.to_i == i}[0]} 
 
       table[r[0]][:start] = activated_data[r[0]][0].number_activated
       
 
       table[r[0]][:count] = periods
-      table[r[0]][:active] = activities
+      table[r[0]][:summary] = summaries
       table[r[0]][:data] = r[1]
       index += 1
     end
