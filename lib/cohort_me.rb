@@ -41,7 +41,7 @@ module CohortMe
     activation_conversion = self.convert_to_cohort_date_in_postgres("#{activation_table_name}.#{activation_time_column}", interval_name)
     activity_conversion = self.convert_to_cohort_date_in_postgres("#{activity_table_name}.created_at", interval_name)
 
-    cohort_query = activation_class.select("#{activation_table_name}.#{activation_user_id}, MIN(#{activation_conversion}) as cohort_date, #{activation_table_name}.#{activation_time_column} as cohort_date_exact").where("#{activation_table_name}.#{activation_time_column} > ?", start_from)
+    cohort_query = activation_class.select("#{activation_table_name}.#{activation_user_id}, MIN(#{activation_conversion}) as cohort_date, MIN(#{activation_table_name}.#{activation_time_column}) as cohort_date_exact").where("#{activation_table_name}.#{activation_time_column} > ?", start_from)
     activated_query = activation_class.select("count(*) number_activated, #{activation_conversion} cohort_date")
 
     if activation_conditions
