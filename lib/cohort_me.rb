@@ -28,27 +28,29 @@ module CohortMe
     cohort_label = nil
 
     if interval_name == "weeks"
-      start_from = start_from_interval.weeks.ago
+      start_from = start_from_interval.weeks.ago.beginning_of_week
       time_conversion = 604800
     elsif interval_name == "days"
-      start_from = start_from_interval.days.ago
+      start_from = start_from_interval.days.ago.beginning_of_day
       time_conversion = 86400
     elsif interval_name == "months"
-      start_from = start_from_interval.months.ago
+      start_from = start_from_interval.months.ago.beginning_of_month
       time_conversion = 1.month.seconds
     end
 
     activation_conversion = self.convert_to_cohort_date_in_postgres("#{activation_table_name}.#{activation_time_column}", interval_name)
     activity_conversion = self.convert_to_cohort_date_in_postgres("#{activity_table_name}.created_at", interval_name)
 
-    cohort_query = activation_class.select("#{activation_table_name}.#{activation_user_id}, MIN(#{activation_conversion}) as cohort_date").group("#{activation_user_id}").where("#{activation_table_name}.{activation_time_column}" > ?", start_from)
-    activated_query = activation_class.select("count(*) number_activated, #{activation_conversion} cohort_date").group("cohort_date")
+    cohort_query = activation_class.select("#{activation_table_name}.#{activation_user_id}, MIN(#{activation_conversion}) as cohort_date, #{activation_table_name}.#{activation_time_column} as cohort_date_exact").where("#{activation_table_name}.#{activation_time_column} > ?", start_from)
+    activated_query = activation_class.select("count(*) number_activated, #{activation_conversion} cohort_date")
 
     if activation_conditions
       activated_query = activated_query.where(activation_conditions)
       cohort_query = cohort_query.where(activation_conditions)
     end
 
+    cohort_query = cohort_query.group("#{activation_user_id}")
+    activated_query = activated_query.group("cohort_date")
     # if custom_selects
     #   cohort_query = cohort_query.select(custom_selects)
     # end
@@ -56,8 +58,8 @@ module CohortMe
     if %(mysql mysql2).include?(ActiveRecord::Base.connection.instance_values["config"][:adapter])
       select_sql = "#{activity_table_name}.#{activity_user_id}, #{activity_table_name}.created_at, cohort_date, FLOOR(TIMEDIFF(#{activity_table_name}.created_at, cohort_date)/#{time_conversion}) as periods_out"
     elsif ActiveRecord::Base.connection.instance_values["config"][:adapter] == "postgresql"
-      select_sql = "count(*) count, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date))/#{time_conversion}) as periods_out"
-      select_summary_sql = "#{summary_column} summary_value, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date))/#{time_conversion}) as periods_out"
+      select_sql = "count(*) count, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date_exact))/#{time_conversion}) as periods_out"
+      select_summary_sql = "#{summary_column} summary_value, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date_exact))/#{time_conversion}) as periods_out"
     else
       raise "database not supported"
     end
