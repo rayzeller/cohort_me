@@ -61,11 +61,13 @@ module CohortMe
     elsif ActiveRecord::Base.connection.instance_values["config"][:adapter] == "postgresql"
       select_sql = "count(distinct #{activity_table_name}.#{activity_user_id}) count, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date_exact))/#{time_conversion}) as periods_out"
       select_summary_sql = "#{summary_column} summary_value, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date_exact))/#{time_conversion}) as periods_out"
+      unique_summary_sql = "distinct orders.user_id as unique_value, cohort_date, FLOOR(extract(epoch from (#{activity_table_name}.created_at - cohort_date_exact))/#{time_conversion}) as periods_out"
     else
       raise "database not supported"
     end
 
     summary_query = activity_class.where("#{activity_table_name}.created_at >= ?", start_from).select(select_summary_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").where("orders.created_at < cohort_date + #{time_conversion} * #{start_from_interval} * INTERVAL '1 SECOND'", time_conversion).where('cohort_date < ?',start_from + (start_from_interval*time_conversion).seconds).where('cohort_date <= ?',start_from + (start_from_interval*time_conversion).seconds).group("cohort_date,periods_out")
+    unique_query = activity_class.where("#{activity_table_name}.created_at >= ?", start_from).select(unique_summary_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").where("orders.created_at < cohort_date + #{time_conversion} * #{start_from_interval} * INTERVAL '1 SECOND'", time_conversion).where('cohort_date < ?',start_from + (start_from_interval*time_conversion).seconds).where('cohort_date <= ?',start_from + (start_from_interval*time_conversion).seconds).group("cohort_date,periods_out,user_id")
     data = activity_class.where("#{activity_table_name}.created_at >= ?", start_from).select(select_sql).joins("JOIN (" + cohort_query.to_sql + ") AS cohorts ON #{activity_table_name}.#{activity_user_id} = cohorts.#{activation_user_id}").where('cohort_date <= ?',start_from + (start_from_interval*time_conversion).seconds).where("orders.created_at < cohort_date + #{time_conversion} * #{start_from_interval} * INTERVAL '1 SECOND'").group("cohort_date,periods_out")
     
     if activity_conditions
@@ -76,6 +78,7 @@ module CohortMe
     # unique_data = data.all.uniq{|d| [d.send(activity_user_id), d.cohort_date, d.periods_out] }
     activated_data = Hash[activated_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}]
     summary_data = Hash[summary_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}]
+    unique_data = Hash[unique_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}]
 
     analysis = data.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}
 
@@ -86,17 +89,20 @@ module CohortMe
     cohort_hash.each do |r| 
       periods = []
       summaries = []
+      uniques = []
 
       table[r[0]] = {}
 
       cohort_hash.size.times{|i| periods << r[1].select{|d| d.periods_out.to_i == i}[0].count  if r[1].select{|d| d.periods_out.to_i == i}[0] } 
       cohort_hash.size.times{|i| summaries << summary_data[r[0]].select{|d| d.periods_out.to_i == i}[0].summary_value  if summary_data[r[0]].select{|d| d.periods_out.to_i == i}[0]} 
+      cohort_hash.size.times{|i| uniques << unique_data[r[0]].select{|d| d.periods_out.to_i == i}.map(&:unique_value)  if unique_data[r[0]].select{|d| d.periods_out.to_i == i}[0]} 
 
       table[r[0]][:start] = activated_data[r[0]][0].number_activated
       
 
       table[r[0]][:count] = periods
       table[r[0]][:summary] = summaries
+      table[r[0]][:unique] = uniques
       table[r[0]][:data] = r[1]
       index += 1
     end
