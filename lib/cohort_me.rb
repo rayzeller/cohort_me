@@ -103,7 +103,7 @@ module CohortMe
       table[r[0]][:count] = periods
       table[r[0]][:summary] = summaries
       table[r[0]][:unique] = uniques
-      table[r[0]][:data] = r[1].map{|o| o.as_json}
+      # table[r[0]][:data] = r[1].map{|o| o.as_json}
       index += 1
     end
 
