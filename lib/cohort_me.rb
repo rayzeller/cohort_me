@@ -3,7 +3,7 @@ require "cohort_me/version"
 module CohortMe
 
   def self.analyze(options={})
-
+    ENV["TZ"] = "US/Pacific"
     start_from_interval = options[:start_from_interval] || 12
     interval_name = options[:period] || "weeks"
     activation_class = options[:activation_class] 
@@ -85,11 +85,11 @@ module CohortMe
     end
     disactivated_data = {}
     # unique_data = data.all.uniq{|d| [d.send(activity_user_id), d.cohort_date, d.periods_out] }
-    activated_data = Hash[activated_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}]
-    summary_data = Hash[summary_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}]
-    disactivated_data = Hash[disactivation_query.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}] if disactivation_class
+    activated_data = Hash[activated_query.group_by{|d| convert_to_cohort_date(DateTime.parse(d.cohort_date.to_s), interval_name, day_offset)}]
+    summary_data = Hash[summary_query.group_by{|d| convert_to_cohort_date(DateTime.parse(d.cohort_date.to_s), interval_name, day_offset)}]
+    disactivated_data = Hash[disactivation_query.group_by{|d| convert_to_cohort_date(DateTime.parse(d.cohort_date.to_s), interval_name, day_offset)}] if disactivation_class
 
-    analysis = data.group_by{|d| convert_to_cohort_date(Time.parse(d.cohort_date.to_s), interval_name, day_offset)}
+    analysis = data.group_by{|d| convert_to_cohort_date(DateTime.parse(d.cohort_date.to_s), interval_name, day_offset)}
 
     cohort_hash =  Hash[analysis.sort_by { |cohort, data| cohort }]
     table = {}
